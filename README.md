@@ -2,7 +2,7 @@
 
 Making a simple operating system written in x86 Assembly.
 
-> **Note**: This project is being developed with assistance from AI to explore OS development concepts,I am a solo dev so its hard to program each line by hand so I take use of AI such  as deepseekv3 etc for the core so I can build upon it , I sitll have to debug , add some other features.
+> **Note**: This project is being developed with assistance from AI to explore OS development concepts,I am a solo dev so its hard to program each line by hand so I take use of AI for the core so I can build upon it , I sitll have to debug , add some other features.
 
 ## Features
 - **Basic Operating System**: Bootloader, kernel, and interactive shell
