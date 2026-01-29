@@ -15,9 +15,9 @@ Making a simple operating system written in x86 Assembly.
 - `info` - System information  
 - `clear` - Clear screen
 - `ls` - List all files
-- `vector` - Create new file with random content
-- `vread [name]` - Read file content
-- `poweroff` - Shutdown system
+- `touch` - Create new file with random content
+- `read [name]` - Read file content
+- `write [file name] [file content]` - Make a file with content
 
 ## Building
 ### Prerequisites
