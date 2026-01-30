@@ -18,6 +18,9 @@ Making a simple operating system written in x86 Assembly.
 - `touch` - Create new file with random content
 - `read [name]` - Read file content
 - `write [file name] [file content]` - Make a file with content
+- `lsd` - List all dirs
+- `mkdir` - Make dirs
+- `cd` - Change dirs
 
 ## Building
 ### Prerequisites
