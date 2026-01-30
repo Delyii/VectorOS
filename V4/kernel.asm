@@ -8,11 +8,9 @@ start:
     cli
     cld
     mov esp, stack_top
-
     call clear_screen
     call pic_remap
     call idt_init
-
     sti
     call draw_taskbar
     call print_banner
@@ -247,33 +245,30 @@ execute_command:
     mov edi, cmd_help
     call strcmp
     jc .help
-    mov edi, cmd_clear
-    call strcmp
-    jc .clear
-    mov edi, cmd_info
-    call strcmp
-    jc .info
     mov edi, cmd_ls
     call strcmp
     jc .ls
-    mov edi, cmd_touch
+    mov edi, cmd_lsd
+    call strcmp
+    jc .lsd
+    mov edi, cmd_mkdir
     call strcmp_prefix
-    jc .touch
-    mov edi, cmd_echo
-    call strcmp_prefix
-    jc .echo
+    jc .mkdir
     mov edi, cmd_write
     call strcmp_prefix
     jc .write
     mov edi, cmd_read
     call strcmp_prefix
     jc .read
-    mov edi, cmd_debug
-    call strcmp
-    jc .debug
+    mov edi, cmd_cd
+    call strcmp_prefix
+    jc .cd
     mov edi, cmd_dump
     call strcmp
     jc .dump
+    mov edi, cmd_clear
+    call strcmp
+    jc .clear
 
     mov esi, unknown
     call puts
@@ -286,302 +281,266 @@ execute_command:
 .clear:
     call clear_screen
     jmp .done
-.info:
-    mov esi, info_msg
-    call puts
-    xor eax, eax
-    cpuid
-    mov [cpu_str], ebx
-    mov [cpu_str+4], edx
-    mov [cpu_str+8], ecx
-    mov esi, cpu_str
-    call puts
-    mov al, 10
-    call putc
-    jmp .done
 .ls:
-    call fs_list_files
+    mov ebx, ram_disk_file_map
+    call fs_list_all
     jmp .done
-.touch:
+.lsd:
+    mov ebx, ram_disk_dir_map
+    call fs_list_all
+    jmp .done
+
+.mkdir:
     add esi, 6
-    mov edi, placeholder_content
-    call fs_create_file
+    mov al, 'd'
+    call fs_create_prefixed_entry
     jmp .done
 
-.read:
-    add esi, 5              ; Skip "read "
-    push esi                ; SAVE pointer to filename
-    call fs_read_file
-    pop esi                 ; RESTORE pointer
-    jmp .done
-
-.skip_read_spaces:
-    cmp byte [esi], ' '
-    jne .do_read
-    inc esi
-    jmp .skip_read_spaces
-.do_read:
-    call fs_read_file
-    jmp .done
-.read_skip:                 ; Skip any extra spaces
-    cmp byte [esi], ' '
-    jne .read_do
-    inc esi
-    jmp .read_skip
-.read_do:
-    call fs_read_file
-    jmp .done
 .write:
-    add esi, 6              ; Skip "write "
+    add esi, 6
 .skip_pre_name:
     cmp byte [esi], ' '
     jne .get_name
     inc esi
     jmp .skip_pre_name
-
 .get_name:
-    mov ebx, esi            ; EBX = start of filename (no leading spaces!)
+    mov ebx, esi
 .find_div:
     lodsb
     test al, al
     jz .write_error
     cmp al, ' '
     jne .find_div
-
-    mov byte [esi-1], 0     ; Null-terminate name
-
-.skip_pre_content:
-    cmp byte [esi], ' '
-    jne .set_content
-    inc esi
-    jmp .skip_pre_content
-
-.set_content:
+    mov byte [esi-1], 0
     mov [fs_ptr_content], esi
-    mov esi, ebx            ; ESI = Filename
-    call fs_create_file
-    jmp .done              ; Skip "write "
-.write_skip_name:           ; Skip spaces before the filename
-    cmp byte [esi], ' '
-    jne .write_start
-    inc esi
-    jmp .write_skip_name
-
-.write_start:
-    mov ebx, esi            ; EBX = Clean start of filename
-.find_space:
-    lodsb
-    test al, al
-    jz .write_error
-    cmp al, ' '
-    jne .find_space
-
-    ; Found the divider space!
-    mov byte [esi-1], 0     ; Null-terminate filename
-
-.write_skip_content:        ; Skip spaces before the content
-    cmp byte [esi], ' '
-    jne .write_set_content
-    inc esi
-    jmp .write_skip_content
-
-.write_set_content:
-    mov [fs_ptr_content], esi
-    mov esi, ebx            ; ESI = Clean Filename
-    call fs_create_file
+    mov esi, ebx
+    mov al, 'f'
+    call fs_create_prefixed_entry
     jmp .done
-
-.found_divider:
-    mov byte [esi-1], 0     ; Terminate filename
-    mov [fs_ptr_content], esi
-    mov esi, ebx            ; ESI = Filename
-    call fs_create_file
-    jmp .done
-
-
-.find_quote:
-    lodsb
-    test al, al
-    jz .write_error         ; Reached end of string without quote
-    cmp al, ' '
-    jne .find_quote
-
-    ; Found the first quote!
-    mov byte [esi-1], 0     ; Null-terminate the filename at the space/quote
-    mov edi, esi            ; EDI now points to the content after the first "
-
-.find_end_quote:
-    lodsb
-    test al, al
-    jz .write_save          ; If no closing quote, just take the rest
-    cmp al, '"'
-    jne .find_end_quote
-    mov byte [esi-1], 0     ; Null-terminate the content
-
-.write_save:
-    mov esi, ebx            ; ESI = Filename
-    ; EDI already points to content
-    call fs_create_file
-    jmp .done
-
-.write_error:             ; EBX points to start of filename
+.write_error:
     mov esi, write_err_msg
     call puts
     jmp .done
 
+.read:
+    add esi, 5
+    mov al, 'f'
+    call fs_read_entry
+    jmp .done
+
+.cd:
+    add esi, 3
+    mov al, 'd'
+    call fs_change_dir
+    jmp .done
+
 .dump:
-    mov esi, ram_disk_map
-    mov ecx, 48             ; 16 bytes * 3 files
-.dump_loop:
-    lodsb
+    mov esi, ram_disk_file_map
+    mov ecx, 64
+    call .do_dump
+    mov esi, ram_disk_dir_map
+    mov ecx, 64
+    call .do_dump
+    jmp .done
+.do_dump:
+.l: lodsb
     test al, al
-    jnz .print_it
-    mov al, '-'             ; Show nulls as dashes
-.print_it:
-    call putc
-    loop .dump_loop
+    jnz .p
+    mov al, '-'
+.p: call putc
+    loop .l
     mov al, 10
     call putc
-    jmp .done
+    ret
 
-.debug:
-    mov esi, ram_disk_map
-    call puts               ; This will print raw names in the map
-    mov al, 10
-    call putc
-    jmp .done
-
-.echo:
-    add esi, 4
-.echo_skip:
-    cmp byte [esi], ' '
-    jne .echo_print
-    inc esi
-    jmp .echo_skip
-.echo_print:
-    call puts
-    mov al, 10
-    call putc
 .done:
     popa
     ret
 
 ; ==================================================
-; MODULE 4: FILESYSTEM (RAMFS)
+; MODULE 4: SIGMA FILESYSTEM (SPLIT MAPS)
 ; ==================================================
 
-fs_create_file:
+; ESI = Name, AL = 'f' or 'd'
+; ESI = Name, AL = 'f' or 'd'
+fs_create_prefixed_entry:
     pusha
-    mov ebp, esi
-    mov ebx, ram_disk_map
-    xor edx, edx            ; FILE INDEX (SAFE)
+    mov dl, al              ; DL = Prefix
+    mov ebp, esi            ; EBP = User Name
 
-.find_slot:
-    cmp byte [ebx], 0
+    mov ebx, ram_disk_file_map
+    cmp dl, 'd'
+    jne .find
+    mov ebx, ram_disk_dir_map
+
+.find:
+    xor ecx, ecx
+.loop:
+    cmp byte [ebx], 0       ; Is slot empty?
     je .found
     add ebx, 16
-    inc edx
-    cmp edx, 16
-    jl .find_slot
+    inc ecx
+    cmp ecx, 32
+    jl .loop
     mov esi, fs_err_full
     call puts
     popa
     ret
 
 .found:
-    ; clear slot
+    ; 1. Clean slot
+    push edi
     mov edi, ebx
-    mov ecx, 16
-    xor al, al
-    rep stosb
+    mov ecx, 4
+    xor eax, eax
+    rep stosd
+    pop edi
 
-    ; copy filename
-    mov esi, ebp
+    ; 2. Write Prefix and Name
     mov edi, ebx
-    mov ecx, 12
-.copy_n:
+    mov al, dl
+    stosb                   ; Store 'f' or 'd'
+    mov esi, ebp
+    mov ecx, 11
+.copy:
     lodsb
     test al, al
-    jz .name_done
+    jz .done_name
     stosb
-    loop .copy_n
-.name_done:
+    loop .copy
+.done_name:
 
-    ; ✅ CORRECT DATA ADDRESS
-    mov eax, edx
-    shl eax, 8
+    ; 3. Stamp with CURRENT Parent ID
+    mov al, [current_dir]
+    mov [ebx + 13], al      ; Byte 13 is the "Home" of this file/dir
+
+    ; 4. If file, copy content to data area
+    cmp dl, 'f'
+    jne .finish
+    mov eax, ecx
+    mov eax, ebx
+    sub eax, ram_disk_file_map
+    shr eax, 4              ; Get Index (Offset / 16)
+    shl eax, 8              ; Data Offset (Index * 256)
     add eax, ram_disk_data
-
-    ; copy content
     mov edi, eax
     mov esi, [fs_ptr_content]
-.copy_d:
+.copy_data:
     lodsb
     stosb
     test al, al
-    jnz .copy_d
+    jnz .copy_data
 
+.finish:
     mov esi, fs_msg_ok
     call puts
     popa
     ret
 
-
-
-fs_list_files:
+fs_change_dir:
     pusha
-    mov ebx, ram_disk_map
-.loop:
+    mov ebp, esi            ; Target name
+
+    ; Handle "cd .."
+    cmp byte [esi], '.'
+    jne .search
+
+    movzx eax, byte [current_dir]
+    cmp al, 0xFF
+    je .done                ; Already at root
+
+    ; Get parent of current dir
+    shl eax, 4
+    add eax, ram_disk_dir_map
+    mov al, [eax + 13]      ; Parent ID
+    mov [current_dir], al
+    mov esi, fs_msg_ok
+    call puts
+    popa
+    ret
+
+.search:
+    mov ebx, ram_disk_dir_map
+    xor ecx, ecx
+.l:
+    cmp byte [ebx], 'd'     ; Is it a directory?
+    jne .n
+    mov al, [ebx + 13]      ; Is it INSIDE our current folder?
+    cmp al, [current_dir]
+    jne .n
+
+    lea edi, [ebx + 1]      ; Compare name
+    mov esi, ebp
+    call strcmp
+    jc .found
+.n:
+    add ebx, 16
+    inc ecx
+    cmp ecx, 32
+    jl .l
+    mov esi, fs_err_nf
+    call puts
+    popa
+    ret
+.found:
+    mov [current_dir], cl   ; Move into this directory (its ID is its index)
+    mov esi, fs_msg_ok
+    call puts
+.done:
+    popa
+    ret
+
+fs_list_all:
+    pusha
+    xor ecx, ecx
+.l:
     cmp byte [ebx], 0
-    je .next
-    mov esi, ebx
+    je .n
+    mov al, [ebx + 13]
+    cmp al, [current_dir]
+    jne .n
+    lea esi, [ebx + 1]      ; Skip prefix ('f' or 'd')
     call puts
     mov al, ' '
     call putc
-.next:
+.n:
     add ebx, 16
-    cmp ebx, ram_disk_map + 256
-    jl .loop
+    inc ecx
+    cmp ecx, 32
+    jl .l
     mov al, 10
     call putc
     popa
     ret
 
-fs_read_file:
+fs_read_entry:
     pusha
-    mov ebp, esi            ; User input (e.g., "dev2")
-    mov ebx, ram_disk_map
-    xor edx, edx            ; Index 0-15
-
-.loop:
-    cmp byte [ebx], 0       ; Is slot empty?
-    je .next
-
-    ; --- DIAGNOSTIC PRINT ---
-    ;mov esi, ebx          ; (Optional) Uncomment these 2 lines
-    ;call puts             ; to see every file the OS "sees" during search
-
+    mov ebp, esi            ; User Name
+    mov ebx, ram_disk_file_map
+    xor ecx, ecx
+.l:
+    cmp byte [ebx], 'f'
+    jne .n
+    mov al, [ebx + 13]
+    cmp al, [current_dir]
+    jne .n
+    lea edi, [ebx + 1]
     mov esi, ebp
-    mov edi, ebx
     call strcmp
-    jc .found_it
-
-.next:
-    add ebx, 16             ; Jump to next slot
-    inc edx
-    cmp edx, 16
-    jl .loop
-
+    jc .found
+.n:
+    add ebx, 16
+    inc ecx
+    cmp ecx, 32
+    jl .l
     mov esi, fs_err_nf
     call puts
     popa
     ret
-
-.found_it:
-    mov eax, edx            ; Use the index we just found
-    shl eax, 8              ; Multiply by 256
+.found:
+    mov eax, ecx
+    shl eax, 8
     add eax, ram_disk_data
-
     mov esi, eax
     call puts
     mov al, 10
@@ -589,8 +548,10 @@ fs_read_file:
     popa
     ret
 
+
+
 ; ==================================================
-; MODULE 5: UTILS & SYSTEM SETUP
+; MODULE 5: UTILS
 ; ==================================================
 
 puts:
@@ -611,16 +572,36 @@ print_banner:
     ret
 
 print_prompt:
-    mov esi, prompt
+    pusha
+    mov al, '('
+    call putc
+
+    movzx eax, byte [current_dir]
+    cmp al, 0xFF            ; Check if we are in Root
+    je .print_root
+
+    ; If not root, look up name
+    movzx ebx, al
+    shl ebx, 4              ; index * 16
+    add ebx, ram_disk_dir_map
+    inc ebx                 ; skip 'd'
+    mov esi, ebx
     call puts
+    jmp .finish_prompt
+
+.print_root:
+    mov esi, root_name      ; "root"
+    call puts
+
+.finish_prompt:
+    mov esi, prompt_end     ; ") > "
+    call puts
+    popa
     ret
 
-strcmp:
-    push esi                ; Save all
-    push edi
-    push eax
-    push ebx
 
+strcmp:
+    pusha
 .loop:
     mov al, [esi]
     mov bl, [edi]
@@ -631,21 +612,13 @@ strcmp:
     inc esi
     inc edi
     jmp .loop
-
-.fail:
-    pop ebx                 ; Restore all
-    pop eax
-    pop edi
-    pop esi
-    clc                     ; No match
-    ret
-
 .success:
-    pop ebx
-    pop eax
-    pop edi
-    pop esi
-    stc                     ; Match!
+    popa
+    stc
+    ret
+.fail:
+    popa
+    clc
     ret
 
 strcmp_prefix:
@@ -736,33 +709,34 @@ bin_to_bcd:
     ret
 
 ; ==================================================
-; MODULE 6: DATA & STORAGE
+; MODULE 6: DATA
 ; ==================================================
 
 cursor_pos dd 80
 cmd_len    dd 0
+current_dir db 0xFF
 
 taskbar_text db " Vector OS V4 | STATUS: ACTIVE | TIME: ", 0
 banner       db "Vector Kernel Loaded.", 10, "Welcome devy.", 10, 0
-prompt       db "> ", 0
+root_name   db "root", 0
+prompt_end  db ") > ", 0
+cmd_lsd     db "lsd", 0      ; Add this so lsd works!
 unknown      db "Unknown command.", 10, 0
-help_msg     db "Commands: help, clear, info, echo, ls, touch, write", 10, 0
-info_msg     db "Vector OS v4.0 (x86 ASM) - CPU: ", 0
-placeholder_content db "New File Content", 0
-cmd_dump   db "dump", 0
+help_msg     db "Commands: help, ls, lsd, mkdir, write, read, cd, dump, clear", 10, 0
 cmd_help   db "help", 0
-cmd_clear  db "clear", 0
-cmd_echo   db "echo", 0
-cmd_info   db "info", 0
 cmd_ls     db "ls", 0
-cmd_touch  db "touch ", 0
-cmd_write     db "write ", 0
-cmd_read      db "read ", 0
-cmd_debug  db "debug", 0
-write_err_msg db "Usage: write name ", 34, "text", 34, 10, 0 ; 34 is ASCII for "
-fs_err_nf     db "File not found.", 10, 0
-fs_msg_ok   db "Success.", 10, 0
-fs_err_full db "Disk full!", 10, 0
+cmd_mkdir  db "mkdir ", 0
+cmd_write  db "write ", 0
+cmd_read   db "read ", 0
+cmd_cd     db "cd ", 0
+cmd_dump   db "dump", 0
+cmd_clear  db "clear", 0
+
+write_err_msg db "Usage: write name content", 10, 0
+fs_err_nf     db "Not found.", 10, 0
+fs_msg_ok     db "Success.", 10, 0
+fs_err_full   db "Disk full!", 10, 0
+
 scancode_us:
     db 0, 27, '1','2','3','4','5','6','7','8','9','0','-','=', 8
     db 9, 'q','w','e','r','t','y','u','i','o','p','[',']', 10
@@ -776,19 +750,17 @@ idtr:
     dd idt
 
 ; ==================================================
-; MODULE 7: BSS AREA (Uninitialized RAM)
+; MODULE 7: BSS
 ; ==================================================
 section .bss
 align 16
 idt             resb 2048
 cmd_buffer      resb 128
-cpu_str         resb 16
 fs_ptr_content  resd 1
 
-; STORAGE AREA (The "Disk")
-ram_disk_map    resb 1024   ; More than enough space
-ram_disk_data   resb 8192   ; 8KB of data space
+ram_disk_file_map resb 512
+ram_disk_dir_map  resb 512
+ram_disk_data     resb 8192
 
-; STACK AREA (Must be at the very bottom)
 stack           resb 8192
 stack_top:
