@@ -1727,7 +1727,7 @@ cmd_lsd     db "lsd", 0      ; Add this so lsd works!
 unknown      db "Unknown command.", 10, 0
 cmd_rmf     db "rmf ", 0
 cmd_rmd     db "rmd ", 0
-help_msg    db "Commands: help, ls, lsd, mkdir, write, read, cd, rmf, rmd, clear",10, 0
+help_msg    db "Commands: help, ls, lsd, mkdir, write, read, cd, rmf, rmd, clear, edit, run",10, 0
 cmd_help   db "help", 0
 cmd_ls     db "ls", 0
 cmd_mkdir  db "mkdir ", 0
