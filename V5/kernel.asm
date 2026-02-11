@@ -1719,7 +1719,7 @@ cursor_pos dd 80
 cmd_len    dd 0
 current_dir db 0xFF
 
-taskbar_text db " Vector OS V4 | STATUS: ACTIVE | TIME: ", 0
+taskbar_text db " Vector OS V5 | STATUS: ACTIVE | TIME: ", 0
 banner       db "Vector Kernel Loaded.", 10, "Welcome devy.", 10, 0
 root_name   db "root", 0
 prompt_end  db ") > ", 0
