@@ -1,9 +1,10 @@
 Vector OS V5
 
 A lightweight, educational x86 operating system built in assembly language. Vector OS features a custom filesystem, built-in text editor, scripting language, and command-line interface.
+
 🚀 Overview
 
-Vector OS V5 is a personal learning project developed over ~6-7 months of x86 assembly and OS development experience. It demonstrates core operating system concepts including protected mode switching, interrupt handling, filesystem design, device drivers, and user interface development.
+Vector OS V5 is a personal learning project developed over ~4-5 months of x86 assembly and OS development experience. It demonstrates core operating system concepts including protected mode switching, interrupt handling, filesystem design, device drivers, and user interface development.
 
     Note: This OS was developed with assistance from AI and LLMs to accelerate production. It's a personal assessment project rather than a long-term production OS.
 
