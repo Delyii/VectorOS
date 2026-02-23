@@ -255,10 +255,6 @@ While this is primarily a learning project, potential enhancements could include
 
     Simple GUI
 
-📜 License
-
-Feel free to use this code for learning purposes. Attribution appreciated but not required.
-
 Built with: Assembly, NASM, QEMU, and a lot of coffee
-Development time: ~6-7 months (including prior experience)
+Development time: ~4-5 months (including prior experience)
 Lines of code: ~2000+ lines of x86 assembly
