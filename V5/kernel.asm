@@ -12,14 +12,19 @@ start:
     call pic_remap
     call idt_init
     call init_fs
+
     sti
     call draw_taskbar
-    call print_banner
-    call print_prompt
+    call load_user_registry      ; NEW
+    call check_user_registry     ; NEW
+    call login_screen
 
 
 .main_loop:
-    hlt
+    ; If login is active, stay in login-idle (hlt waiting for keys)
+    cmp byte [login_mode], 1
+    je .login_idle
+
 
     ; Handle character echo
     cmp byte [echo_needed], 1
@@ -44,6 +49,36 @@ start:
     mov byte [newline_needed], 0
     mov al, 10
     call putc
+
+.kernel_loop:
+    hlt
+
+    ; Handle character echo (shell only)
+    cmp byte [echo_needed], 1
+    jne .check_backspace
+    mov byte [echo_needed], 0
+    mov eax, [cmd_len]
+    dec eax
+    mov al, [cmd_buffer + eax]
+    call putc
+
+    ; ... rest of shell handling unchanged ...
+    jmp .kernel_loop
+
+.login_idle:
+    hlt
+    jmp .main_loop
+
+
+.check_newline_first:
+    cmp byte [newline_needed], 1
+    jne .check_command
+
+    mov byte [newline_needed], 0
+    mov al, 10
+    call putc
+
+
 
 .check_command:
     ; Check for pending command
@@ -128,6 +163,27 @@ putc:
     popa
     ret
 
+load_user_registry:
+    mov eax, USER_REGISTRY_LBA
+    mov cl, 1
+    mov edi, user_registry_buffer
+    call disk_read
+    mov eax, [user_registry_buffer]
+    call print_int
+    mov al, 10
+    call putc
+    ret
+
+check_user_registry:
+    mov eax, [user_registry_buffer]
+    cmp eax, USER_REGISTRY_SIGNATURE
+    je .done
+
+    call first_time_setup
+
+.done:
+    ret
+
 update_cursor:
     pusha
     mov ebx, [cursor_pos]
@@ -144,6 +200,86 @@ update_cursor:
     mov al, bh
     out dx, al
     popa
+    ret
+
+handle_login_input:
+    test al, al
+    jz .eoi_login
+
+    cmp al, 10
+    je .enter
+
+    cmp al, 8
+    je .backspace
+
+    mov ecx, [login_len]
+    cmp ecx, 31
+    jge .eoi_login
+
+    mov [login_buffer + ecx], al
+    inc dword [login_len]
+    call putc
+    jmp .eoi_login
+
+.backspace:
+    cmp dword [login_len], 0
+    je .eoi_login
+    dec dword [login_len]
+    mov al, 8
+    call putc
+    jmp .eoi_login
+
+.enter:
+    mov eax, [login_len]
+    mov byte [login_buffer + eax], 0
+
+    cmp byte [login_stage], 0
+    je .check_username
+
+    cmp byte [login_stage], 1
+    je .check_password
+
+.check_username:
+    mov esi, login_buffer
+    call find_user
+    jc .fail                ; CHECK IMMEDIATELY
+
+    ; Success → move to password stage
+    mov byte [login_stage], 1
+    mov dword [login_len], 0
+
+    mov al, 10
+    call putc
+
+    mov esi, password_prompt
+    call puts
+
+    jmp .eoi_login
+
+.check_password:
+    mov esi, login_buffer
+    call verify_password
+    jc .fail
+
+    mov byte [login_mode], 0
+    mov dword [login_len], 0
+    call clear_screen
+    call print_banner
+    call print_prompt
+    jmp .eoi_login
+
+.fail:
+        ; print newline first
+    mov al, 10
+    call putc
+    mov esi, login_failed
+    call puts
+    mov byte [login_stage], 0
+    mov dword [login_len], 0
+    mov esi, username_prompt
+    call puts
+
+.eoi_login:
     ret
 
 draw_taskbar:
@@ -243,6 +379,16 @@ keyboard_handler:
     movzx ebx, al
     mov al, [scancode_us + ebx] ; Convert to ASCII
 
+    ;--- LOGIN SYSTEM ---
+    cmp byte [login_mode], 1
+    jne .not_login
+
+    call handle_login_input
+    jmp .eoi
+
+
+.not_login:
+
     ; --- SHARED KEY SYSTEM ---
     mov [last_key], al
     mov [last_scancode], ah
@@ -285,6 +431,8 @@ keyboard_handler:
     ; Set backspace flag
     mov byte [backspace_needed], 1
     jmp .eoi
+
+
 
 .enter:
     ; Mark that we have a command to execute
@@ -439,6 +587,8 @@ execute_command:
 
 .run:
     add esi, 4
+    mov al, [current_user]
+    mov [temp_owner], al
     call vec_run
     jc .run_err
     jmp .done
@@ -688,7 +838,7 @@ fs_create_prefixed_entry:
     mov [ebx + 12], al          ; perms
     mov al, [current_dir]
     mov [ebx + 13], al          ; parent
-    mov al, [temp_owner]
+    mov al, [current_user]
     mov [ebx + 14], al          ; owner
 
     ; Size: only meaningful for files — use temp_size (may be zero)
@@ -890,10 +1040,28 @@ fs_read_entry:
     call fs_find_entry
     jc .nf
 
+
+
+    ; root bypass first
+    cmp byte [current_user], 0
+    je .allow
+
+    ; then owner match
+    mov al, [ebx + 14]
+    cmp al, [current_user]
+    je .allow
+
+    jmp .permission_denied
+
+
+.allow:
+
     ; EBX -> pointer to metadata in fs_scratchpad, ECX = slot index, EAX = metadata LBA
     ; Read file size from metadata (offset +16)
     mov eax, [ebx + 16]
     mov [temp_size], eax
+
+
 
     ; Compute Data LBA: 200 + ((meta_lba - 100) * 16) + slot
     mov eax, [current_search_lba]
@@ -924,6 +1092,14 @@ fs_read_entry:
     call putc
     popa
     ret
+
+.permission_denied:
+    mov esi, perm_err
+    call puts
+    popa
+    ret
+
+
 
 .nf:
     mov esi, fs_err_nf
@@ -995,10 +1171,27 @@ fs_load_silent:
 ; --- FS_DELETE_FILE ---
 fs_delete_file:
     pusha
+
+     ; root bypass first
+    cmp byte [current_user], 0
+    je .allow
+
+    ; then owner match
+    mov al, [ebx + 14]
+    cmp al, [current_user]
+    je .allow
+
+    jmp .permission_denied
+
+
+.allow:
     mov al, 'f'
     call .do_del
     popa
     ret
+
+
+
 
 .do_del:
     call fs_find_entry
@@ -1034,6 +1227,12 @@ fs_delete_file:
     call puts
     ret
 
+.permission_denied:
+    mov esi, perm_err
+    call puts
+    popa
+    ret
+
 .nf_err:
     mov esi, fs_err_nf
     call puts
@@ -1042,10 +1241,26 @@ fs_delete_file:
 ; --- FS_DELETE_DIR ---
 fs_delete_dir:
     pusha
+
+    ; root bypass first
+    cmp byte [current_user], 0
+    je .allow
+
+    ; then owner match
+    mov al, [ebx + 14]
+    cmp al, [current_user]
+    je .allow
+
+    jmp .permission_denied
+
+.allow:
     mov al, 'd'
     call .do_del_dir
     popa
     ret
+
+
+
 
 .do_del_dir:
     call fs_find_entry
@@ -1077,6 +1292,14 @@ fs_delete_dir:
     mov esi, fs_msg_ok
     call puts
     ret
+
+.permission_denied:
+    mov esi, perm_err
+    call puts
+    popa
+    ret
+
+
 
 .nf_err_dir:
     mov esi, fs_err_nf
@@ -1344,17 +1567,250 @@ puts:
     popa
     ret
 
+copy_11_bytes:
+    mov ecx, 11
+.copy:
+    lodsb
+    test al, al
+    jz .pad
+    stosb
+    loop .copy
+    ret
+
+.pad:
+    mov al, 0
+.pad_loop:
+    stosb
+    loop .pad_loop
+    ret
+
+read_line_into_buffer:
+    mov dword [login_len], 0
+
+.wait:
+    hlt
+    cmp byte [key_ready], 1
+    jne .wait
+
+    mov al, [last_key]
+    mov byte [key_ready], 0
+
+    cmp al, 10
+    je .done
+
+    mov ecx, [login_len]
+    cmp ecx, 31
+    jge .wait
+
+    mov [setup_buffer + ecx], al
+    inc dword [login_len]
+    call putc
+    jmp .wait
+
+.done:
+    mov eax, [login_len]
+    mov byte [setup_buffer + eax], 0
+    mov al, 10
+    call putc
+    ret
+
 print_banner:
     mov esi, banner
     call puts
     ret
 
+login_screen:
+    ; initialize login state
+    mov byte [login_mode], 1      ; enable login input
+    mov byte [login_stage], 0     ; 0 = username, 1 = password
+    mov dword [login_len], 0
 
+    mov esi, login_banner
+    call puts
+
+    ; show username prompt
+    mov esi, username_prompt
+    call puts
+
+    ret
+
+find_user:
+    pusha
+    xor ecx, ecx
+
+.loop:
+    cmp ecx, MAX_USERS
+    jge .fail
+
+    mov eax, ecx
+    imul eax, USER_RECORD_SIZE
+    mov edi, user_registry_buffer + 4
+    add edi, eax
+
+    mov al, [edi]         ; UID
+    cmp al, 255
+    je .next              ; empty slot
+
+    ; compare username at [edi + 1]
+    push esi
+    lea edi, [edi + 1]
+    call strcmp
+    pop esi
+    jc .found
+
+.next:
+    inc ecx
+    jmp .loop
+
+.found:
+    mov [current_user], cl
+    popa
+    clc
+    ret
+
+.fail:
+    popa
+    stc
+    ret
+
+; ----------------------------------------
+; verify_password
+; IN:  ESI -> login_buffer (null terminated)
+; OUT: CF = 0 success
+;      CF = 1 failure
+; ----------------------------------------
+verify_password:
+    pusha
+
+    movzx eax, byte [current_user]
+    imul eax, USER_RECORD_SIZE
+
+    mov edi, user_registry_buffer + 4
+    add edi, eax
+    add edi, 12        ; password offset
+
+    mov esi, login_buffer
+
+.compare:
+    mov al, [esi]
+    mov bl, [edi]
+    cmp al, bl
+    jne .fail
+    test al, al
+    je .success
+    inc esi
+    inc edi
+    jmp .compare
+
+.success:
+    popa
+    clc
+    ret
+
+.fail:
+    popa
+    stc
+    ret
+
+first_time_setup:
+    call clear_screen
+    mov esi, setup_banner
+    call puts
+
+    ; Write signature
+    mov dword [user_registry_buffer], USER_REGISTRY_SIGNATURE
+
+    ; -------------------
+    ; ROOT USER
+    ; -------------------
+
+    mov esi, setup_root_prompt
+    call puts
+    call read_line_into_buffer
+
+    ; Root record starts at +4
+    mov edi, user_registry_buffer + 4
+
+    mov byte [edi], 0              ; UID = 0
+
+    ; username
+    mov esi, root_name
+    lea edi, [user_registry_buffer + 4 + 1]
+    call copy_11_bytes
+
+    ; password
+    mov esi, setup_buffer
+    lea edi, [user_registry_buffer + 4 + 12]
+    call copy_11_bytes
+
+    ; -------------------
+    ; NORMAL USER
+    ; -------------------
+
+    mov esi, setup_user_prompt
+    call puts
+    call read_line_into_buffer
+
+    ; second record = +4 + USER_RECORD_SIZE
+    mov edi, user_registry_buffer + 4 + USER_RECORD_SIZE
+
+    mov byte [edi], 1   ; UID = 1
+
+    ; username
+    mov esi, setup_buffer
+    lea edi, [user_registry_buffer + 4 + USER_RECORD_SIZE + 1]
+    call copy_11_bytes
+
+    mov esi, setup_pass_prompt
+    call puts
+    call read_line_into_buffer
+
+    ; password
+    mov esi, setup_buffer
+    lea edi, [user_registry_buffer + 4 + USER_RECORD_SIZE + 12]
+    call copy_11_bytes
+
+    ; Write to disk
+    mov eax, USER_REGISTRY_LBA
+    mov cl, 1
+    mov esi, user_registry_buffer
+    call disk_write
+
+    ; clear shell flags
+    mov byte [echo_needed], 0
+    mov byte [newline_needed], 0
+    mov byte [backspace_needed], 0
+    mov byte [cmd_pending], 0
+    mov dword [cmd_len], 0
+
+    ret
 
 print_prompt:
     pusha
+
+    ; ----------------------------------
+    ; Load username from registry
+    ; ----------------------------------
+
+    movzx eax, byte [current_user]     ; eax = UID
+    imul eax, USER_RECORD_SIZE         ; eax = offset inside registry
+
+    mov esi, user_registry_buffer
+    add esi, 4                         ; skip signature
+    add esi, eax                       ; move to correct record
+    add esi, 1                         ; skip UID byte → now at username
+
+    call puts
+
+    mov al, '@'
+    call putc
+
+    mov esi, os_name
+    call puts
+
     mov al, '('
     call putc
+
 
     movzx eax, byte [current_dir]   ; EAX = current_dir (global slot index)
     cmp al, 0xFF
@@ -1769,6 +2225,13 @@ vec_info_msg db "VEC file: entry offset = ",0
 vec_bad_msg  db "Not a valid .vec file",10,0
 buffer_size    dd 0
 
+temp_owner dd 0
+
+setup_banner db "First Time Setup",10,0
+setup_root_prompt db "Set root password: ",0
+setup_user_prompt db "Create normal username: ",0
+setup_pass_prompt db "Set user password: ",0
+
 editor_x dd 0
 editor_y dd 0
 edit_buffer times 4096 db 0
@@ -1779,7 +2242,32 @@ saved_cursor dd 0
 saved_esp dd 0
 cursor_x dd 0
 cursor_y dd 0
-debug_header db "VEC Editor Debug - Press keys, ESC to exit", 10, "Scancodes shown in hex", 10, 0
+
+current_user db 0
+
+; ===============================
+; USER SYSTEM
+; ===============================
+
+
+
+user_count db 2
+
+user_names:
+    db "root",0, 27 dup(0)
+    db "dev",0, 28 dup(0)
+
+user_passwords:
+    db "root",0, 27 dup(0)
+    db "1",0, 28 dup(0)
+
+user_ids:
+    db 0
+    db 1
+
+
+login_index  db 0
+
 scancode_msg db "Last scancode: 0x", 0
 ascii_msg db "  ASCII: 0x", 0
 got_scancode_msg db "Got scancode: 0x", 0
@@ -1788,25 +2276,20 @@ got_ascii_msg db "  ASCII: 0x", 0
 ved_cursor dd 0
 MAX_LINES     equ 100
 LINE_LENGTH   equ 80
-
+os_name db "vector",0
     ; Editor strings
 ved_header      db "Vector Editor 2.0 | F1: Help | ESC: Save & Exit", 0
 ved_status_prefix db "Pos: ", 0
 ved_help        db "Arrows: Move | Enter: New line | Backspace: Delete | Tab: Indent | ESC: Exit", 0
+perm_err db "Permission denied.",10,0
+login_banner db "Vector OS Login",10,0
+username_prompt db "Username: ",0
+password_prompt db "Password: ",0
+login_failed db "Login failed.",10,0
+
+USER_REGISTRY_SIGNATURE equ 0x52535556
 
     ; Syntax highlighting keywords
-syntax_keywords:
-    db "print", 0
-    db "set", 0
-    db "add", 0
-    db "sub", 0
-    db "sleep", 0
-    db "if", 0
-    db "else", 0
-    db "while", 0
-    db "for", 0
-    db "input", 0
-    db 0  ; End marker
 
 
 
@@ -1836,7 +2319,7 @@ fs_ptr_content  resd 1
 ;temp data
 fs_scratchpad      resb 1024    ; The 512-byte buffer for disk I/O
 current_search_lba resd 1      ; To store the current LBA being searched
-temp_owner         resb 1      ; Metadata storage
+      ; Metadata storage
 temp_perms         resb 1      ; Metadata storage
 temp_size          resd 1      ; Metadata storage
 temp_type          resb 1      ; Metadata storage
@@ -1854,6 +2337,21 @@ echo_needed     resb 1
 backspace_needed resb 1
 newline_needed  resb 1
 
+
+user_registry_buffer resb 1024
+
+login_buffer     resb 32
+login_len        resd 1
+login_stage      db 0   ; 0=username, 1=password
+login_mode       db 1
+
+USER_STRIDE equ 32
+
+
+MAX_USERS equ 32
+USER_RECORD_SIZE equ 32
+USER_REGISTRY_LBA equ 50
+
 line_buffer      resb MAX_LINES * LINE_LENGTH
 line_lengths     resb MAX_LINES
 total_lines      resd 1
@@ -1862,6 +2360,8 @@ cursor_col       resd 1
 cursor_row       resd 1
 screen_top_line  resd 1
 dirty_flag       resb 1
+
+setup_buffer resb 32
 
     ; Colors
 color_normal     resb 1
