@@ -1,353 +1,158 @@
-Vector OS V5
+🛰️ Vector OS V5
 
-A lightweight, educational x86 operating system built in assembly language. Vector OS features a custom filesystem, user authentication system, built-in text editor, scripting language, and command-line interface.
-
+A lightweight, educational x86 operating system built entirely in Assembly language. Vector OS features a custom filesystem, user authentication, a built-in text editor, and its own scripting language.
 🚀 Overview
 
-Vector OS V5 is a personal learning project developed over ~4–5 months of x86 assembly and OS development experience. It demonstrates core operating system concepts including:
+Vector OS V5 is a personal learning project developed over ~5 months of x86 assembly exploration. It serves as a deep dive into low-level systems programming, demonstrating:
 
-protected mode switching
+    Switching from 16-bit real mode to 32-bit protected mode.
 
-interrupt handling
+    Interrupt Handling via PIC remapping and IDT setup.
 
-filesystem design
+    Custom Filesystem design and sector-based storage.
 
-device drivers
+    Device Drivers for keyboard, disk (ATA PIO), and VGA.
 
-user authentication and permissions
+    User Security with persistent authentication and permissions.
 
-command shell and scripting runtime
+    Note: This project was developed with assistance from AI/LLMs to accelerate the learning curve. It is an educational assessment project rather than a production-grade OS.
 
-The OS runs in 32-bit protected mode and provides a small but usable environment with persistent storage.
+✨ Core Features
+🖥️ System Architecture
 
-Note: This OS was developed with assistance from AI and LLMs to accelerate development. It is a personal assessment project rather than a production OS.
+    Transition: 16-bit → 32-bit protected mode.
 
-✨ Features
-Core System
+    GDT: Custom Global Descriptor Table with code and data segments.
 
-16-bit → 32-bit protected mode transition
+    Interrupts: PIC remapping; IDT with keyboard and timer handlers.
 
-Custom GDT with code and data segments
+    Hardware: RTC (Real-Time Clock) integration and VGA text mode interface.
 
-PIC remapping for interrupt management
+🔐 User Authentication
 
-IDT setup with keyboard and timer handlers
+Vector OS V5 includes a persistent login system and user permission model.
 
-RTC (Real-Time Clock) integration
+    First-boot Setup: Interactive wizard for initial configuration.
 
-VGA text mode interface
+    Registry: Persistent user database stored directly on disk.
 
-🔐 User Authentication System
+    Roles: Supports multiple users including a Root administrator (UID 0) who bypasses all permission checks.
 
-Vector OS V5 includes a persistent login and user permission system.
+User Record Structure (32 bytes):
+Offset	Field	Size	Description
+0	UID	1 Byte	Unique User ID
+1	Username	11 Bytes	Account Name
+12	Password	11 Bytes	Account Password
+📂 Filesystem Design
 
-Features
+The OS utilizes a custom sector-based filesystem designed for simplicity and speed.
+Disk Layout
+LBA Range	Content
+LBA 0	Boot sector
+LBA 1-99	Kernel / Reserved
+LBA 50	User Registry
+LBA 100-120	Metadata Sectors (Directory/File headers)
+LBA 200+	File Data Sectors
+Metadata Entry (32 bytes)
+Offset	Field	Size	Description
+0	Type	1	'f' for file, 'd' for directory
+1-11	Name	11	Filename string
+12	Perms	1	Permission flags
+13	Parent	1	Parent directory ID
+14	Owner	1	Owner UID
+16-19	Size	4	File size in bytes
+🛠️ Built-in Tools
+⌨️ Command Line Interface
 
-First-boot setup wizard
+    ls / lsd: List files and directories.
 
-Persistent user registry stored on disk
+    mkdir / write: Create directories and files.
 
-Multiple user accounts
+    rmf / rmd: Delete files and directories.
 
-Root administrator account
+    edit: Launch the VED (Vector Editor).
 
-Per-file ownership enforcement
+    run: Execute a Vector script.
 
-Permission checks for file operations
+    format: Wipe the disk and reset the filesystem.
 
-Login Flow
+📝 VED — Vector Editor
 
-On boot the kernel:
+A fullscreen text editor supporting:
 
-Load user registry
-↓
-Validate registry signature
-↓
-Run first-time setup if registry missing
-↓
-Display login prompt
-↓
-Authenticate user
-↓
-Enter shell
+    File loading/saving to disk.
 
-Example login screen:
+    Full cursor movement and backspace handling.
 
-Vector OS Login
-Username:
-Password:
-User Registry
+    4KB editing buffer.
 
-User accounts are stored on disk in a registry sector.
+    ESC to exit and save.
 
-Sector: LBA 50
-Size: 1024 bytes
-Max users: 32
-Record size: 32 bytes
-User Record Structure
-Offset  Field       Size
-0       UID         1
-1       Username    11 bytes
-12      Password    11 bytes
+📜 Vector Scripting Language
 
-User ID 0 is reserved for root, which bypasses permission checks.
+A lightweight interpreted language for automation.
+Bash
 
-Permissions Model
-
-Filesystem entries store an owner UID.
-
-Example metadata field:
-
-owner = user id that created the file
-
-Operations enforce permissions:
-
-Operation	Behavior
-read	allowed if root OR owner
-write	allowed if root OR owner
-delete	allowed if root OR owner
-
-If access is denied:
-
-Permission denied.
-Filesystem
-
-Vector OS uses a custom sector-based filesystem designed for simplicity and speed.
-
-Features
-
-32-byte metadata entries
-
-Sector-based storage
-
-Hierarchical directory system
-
-File ownership tracking
-
-File and directory operations
-
-Filesystem Layout
-LBA 0        Boot sector
-LBA 1-99     Kernel / reserved
-LBA 50       User registry
-LBA 100-120  Metadata sectors
-LBA 200+     File data sectors
-Metadata Entry Structure (32 bytes)
-Offset  Field       Size  Description
-0       type        1     'f'=file, 'd'=directory
-1-11    name        11    filename
-12      perms       1     permissions
-13      parent      1     parent directory id
-14      owner       1     owner UID
-16-19   size        4     file size
-
-Each metadata sector contains 16 entries.
-
-Shell Commands
-help     - Display available commands
-ls       - List files
-lsd      - List directories
-mkdir    - Create directory
-write    - Create file
-read     - Display file contents
-cd       - Change directory
-rmf      - Delete file
-rmd      - Delete directory
-clear    - Clear screen
-edit     - Open Vector Editor
-run      - Execute Vector script
-dump     - Dump filesystem metadata
-format   - Wipe disk and reset filesystem
-compile  - Compile Vector scripts
-VED — Vector Editor
-
-A built-in fullscreen text editor.
-
-Features
-
-File loading
-
-File saving
-
-Cursor movement
-
-Backspace + newline handling
-
-ESC to exit and save
-
-4KB editing buffer
-
-Example header:
-
-Vector Editor (ESC to exit)
----------------------------------------
-Vector Scripting Language
-
-Vector OS includes a lightweight scripting language.
-
-Features
-
-integer variables
-
-arithmetic operations
-
-basic control flow
-
-command execution
-
-Variables are prefixed with /.
-
-Example:
-
+# Example Script
 set /counter 5
-print /counter
+print "Starting count..."
 add /counter 3
-print "Now: /counter"
+print "Current value: /counter"
 
-Supported commands:
+🔧 Technical Specifications
+Memory Layout
+Address	Usage
+0x7C00	BIOS Bootloader load address
+0x1000	Kernel load address
+0x90000	System Stack
+0xB8000	VGA Text Buffer (Video Memory)
+Hardware Drivers
 
-print
-set
-add
-sub
-sleep
-label
-goto
-input
-clear
-Hardware Support
+    Disk: ATA PIO driver with sector read/write and cache flushing.
 
-Drivers implemented directly in assembly:
+    Input: PS/2 keyboard driver (Scancode → ASCII translation).
 
-Disk
+    Display: VGA text mode with scrolling and cursor control.
 
-ATA PIO disk driver
+    Clock: RTC hardware access with BCD conversion.
 
-Sector read/write
-
-Cache flush
-
-Input
-
-PS/2 keyboard driver
-
-Scancode → ASCII translation
-
-Display
-
-VGA text mode
-
-Cursor control
-
-Screen scrolling
-
-Time
-
-RTC hardware access
-
-BCD time conversion
-
-Dynamic taskbar clock
-
-UI Features
-
-Taskbar with real-time clock
-
-Command prompt with username and directory
-
-Scrollable terminal
-
-Colored VGA text output
-
-Example prompt:
-
-root@vector(root) >
-dev@vector(docs) >
-🛠️ Building and Running
+🔨 Building and Running
 Requirements
 
-NASM
+    NASM (Netwide Assembler)
 
-QEMU
+    QEMU (i386 Emulator)
 
-Windows PowerShell (for build script)
+    Windows PowerShell (for the build script)
 
-Build Script (PowerShell)
+Build Script
+PowerShell
+
+# Assemble the components
 nasm -f bin boot.asm -o boot.bin
 nasm -f bin kernel.asm -o kernel.bin
 
+# Create 1MB disk image if it doesn't exist
 if (!(Test-Path "vector_os.img")) {
-    echo "Creating new 1MB disk image..."
     fsutil file createnew vector_os.img 1048576
 }
 
+# Combine and write to image
 cmd /c "copy /b boot.bin + kernel.bin system_temp.bin"
-
 $fileStream = [System.IO.File]::OpenWrite("$PWD\vector_os.img")
 $bytes = [System.IO.File]::ReadAllBytes("$PWD\system_temp.bin")
 $fileStream.Write($bytes, 0, $bytes.Length)
 $fileStream.Close()
 
-del boot.bin
-del kernel.bin
-del system_temp.bin
-
+# Run in QEMU
 qemu-system-i386 -hda vector_os.img
-📁 Project Structure
-boot.asm            Bootloader (16-bit)
-kernel.asm          Main OS kernel
-disk_driver.asm     ATA disk driver
-vector.asm          Vector script runtime
-veccompiler.asm     Vector compiler
-build.ps1           Build script
-🔧 Memory Layout
-0x7C00   BIOS bootloader load address
-0x1000   Kernel load address
-0x90000  Stack
-0xB8000  VGA text buffer
-🎯 Project Goals
 
-Vector OS was built to explore:
+⚠️ Limitations & Future Work
 
-x86 architecture
+    Max Entries: Limited to ~320 filesystem entries.
 
-protected mode
+    File Size: Currently limited to one sector (512 bytes).
 
-interrupt handling
+    Tasks: Single-task execution (no multitasking yet).
 
-filesystem implementation
-
-shell design
-
-scripting engines
-
-The goal was to create a small but functional operating system entirely in assembly.
-
-🐛 Known Limitations
-
-Max ~320 filesystem entries
-
-File size limited to one sector (512 bytes)
-
-No memory protection
-
-Single-task execution model
-
-Minimal error recovery
-
-🔮 Possible Future Improvements
-
-multitasking
-
-larger files
-
-memory management
-
-GUI
-
-networking
-
-Built with NASM, QEMU, and pure x86 assembly
-
-Development time: ~4–5 months
-Lines of code: ~2500+ assembly lines
+    Future Goals: Implement a GUI, memory management, and networking stack.
