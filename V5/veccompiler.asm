@@ -1,5 +1,5 @@
 ; ==================================================
-; VECTOR SCRIPT ENGINE V6 - "THE GAME ENGINE"
+; VECTOR SCRIPT ENGINE V6 - "THE INTERPRETER ENGINE"
 ; ==================================================
 BITS 32
 
